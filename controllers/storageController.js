@@ -1,40 +1,29 @@
-const { bucket } = require('../config/firebase');
 
-// Upload file ke Firebase Storage
-exports.uploadFile = async (req, res) => {
-  try {
-    const userId = req.user.uid; // ID pengguna dari token, jika menggunakan otentikasi
-    const file = req.file;
+const admin = require('firebase-admin');
+const { v4: uuidv4 } = require('uuid');
 
-    if (!file) {
-      return res.status(400).json({ message: 'No file uploaded' });
-    }
+exports.uploadImageToFirebase = async (file) => {
+    const bucket = admin.storage().bucket();
+    const fileName = `${uuidv4()}-${file.originalname}`;
+    const fileUpload = bucket.file(fileName);
 
-    // Tentukan path file
-    const filePath = `user-files/${userId}/${Date.now()}-${file.originalname}`;
-    const blob = bucket.file(filePath);
-
-    // Buat stream untuk upload
-    const blobStream = blob.createWriteStream({
-      metadata: {
-        contentType: file.mimetype,
-      },
+    const stream = fileUpload.createWriteStream({
+        metadata: {
+            contentType: file.mimetype,
+        },
     });
 
-    // Event selesai upload
-    blobStream.on('finish', async () => {
-      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
-      res.status(200).json({ message: 'File uploaded successfully', publicUrl });
-    });
+    return new Promise((resolve, reject) => {
+        stream.on('error', (error) => {
+            reject(error);
+        });
 
-    // Event error
-    blobStream.on('error', (err) => {
-      res.status(500).json({ message: err.message });
-    });
+        stream.on('finish', async () => {
+            // Make the file publicly accessible
+            await fileUpload.makePublic();
+            resolve(`https://storage.googleapis.com/${bucket.name}/${fileName}`);
+        });
 
-    // Akhiri stream
-    blobStream.end(file.buffer);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+        stream.end(file.buffer);
+    });
 };

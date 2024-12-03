@@ -1,8 +1,8 @@
 const { db } = require('../config/firebase');
 const admin = require('firebase-admin');
-
-
-
+const storageController = require('./storageController');
+const axios = require('axios');
+const dotenv = require('dotenv');
 exports.getAllTopic = async (req, res) => {
   try {
     const snapshot = await db.collection('topics').get();
@@ -16,7 +16,6 @@ exports.getAllTopic = async (req, res) => {
 
 exports.addTopic = async (req, res) => {
   try {
-    
     const data = req.body;
     if (
       typeof data.account_id !== 'string' || 
@@ -25,7 +24,6 @@ exports.addTopic = async (req, res) => {
     ) {
       return res.status(400).json({ message: 'Invalid data format. Data must contain only account_id and topic as strings.' });
     }
-  
     if (data.topic.length > 255) {
       return res.status(400).json({ message: 'Topic exceeds maximum length of 255 characters.' });
     }
@@ -41,11 +39,9 @@ exports.getTopicByUid = async (req, res) => {
   try {
     const { uid } = req.params; 
     const snapshot = await db.collection('topics').where('account_id', '==', uid).get();
-
     if (snapshot.empty) {
       return res.status(404).json({ message: 'No topics found for this account' });
     }
-
     const topics = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(topics);
   } catch (error) {
@@ -103,30 +99,30 @@ exports.getAllArticle = async (req, res) => {
 };
 exports.addArticle = async (req, res) => {
   try {
-    
-    const data = req.body;
-    if (
-      typeof data.article_link !== 'string' || 
-      typeof data.image_url !== 'string' || 
-      typeof data.short_description !== 'string' || 
-      typeof data.title !== 'string' || 
-      Object.keys(data).length !== 4
-    ) {
-      return res.status(400).json({ message: 'Invalid data format. Data must contain only account_id and topic as strings.' });
-    }
-  
-    if (data.topic.length > 255) {
-      return res.status(400).json({ message: 'article exceeds maximum length of 255 characters.' });
-    }
-    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
-    const docRef = await db.collection('article').add(data);
-    res.status(201).json({ id: docRef.id, message: 'article added successfully!' });
+      const data = req.body;
+
+
+      if (data.short_description.length > 255) {
+          return res.status(400).json({ message: 'article exceeds maximum length of 255 characters.' });
+      }
+
+      const imageFile = req.file; 
+      if (!imageFile) {
+          return res.status(400).json({ message: 'Image file is required.' });
+      }
+
+      const imageUrl = await storageController.uploadImageToFirebase(imageFile);
+      data.image_url = imageUrl; 
+
+   
+      data.topic_date = admin.firestore.FieldValue.serverTimestamp();
+
+      const docRef = await db.collection('article').add(data);
+      res.status(201).json({ id: docRef.id, message: 'Article added successfully!' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+      res.status(500).json({ message: error.message });
   }
 };
-
-
 exports.addComment = async (req, res) => {
   try {
     
@@ -238,37 +234,66 @@ exports.deleteComment = async (req, res) => {
 
 
 //AUTH
-exports.login =  async (req, res) => {
+exports.login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // Autentikasi pengguna menggunakan Firebase Authentication
-    const userRecord = await admin.auth().getUserByEmail(email);
-    
-    // Jika user ditemukan, kita bisa mengeluarkan token
-    const token = await admin.auth().createCustomToken(userRecord.uid);
-    
-    return res.status(200).json({ token });
+    // Kirim request ke Firebase Authentication REST API
+    const response = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.FIREBASE_API_KEY}`,
+      {
+        email,
+        password,
+        returnSecureToken: true,
+      }
+    );
+
+    const { idToken, localId } = response.data;
+
+    // Dapatkan informasi pengguna menggunakan Admin SDK
+    const userRecord = await admin.auth().getUser(localId);
+
+    res.status(200).json({
+      token: idToken, // Token untuk otentikasi sisi klien
+      biodata: {
+        uid: userRecord.uid,
+        email: userRecord.email,
+      },
+    });
   } catch (error) {
-    console.error('Error fetching user data:', error);
-    return res.status(401).json({ error: 'Invalid credentials' });
+    console.error(error.message);
+    res.status(401).json({ error: 'Unauthorized' });
   }
-}
+},
+
+
+
 
 
 
 exports.logout = async (req, res) => {
-  const { uid } = req.body; 
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  }
+
+  const idToken = authHeader.split(' ')[1]; 
 
   try {
-      await admin.auth().revokeRefreshTokens(uid);
+    // Decode token untuk mendapatkan UID pengguna
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const uid = decodedToken.uid;
 
-      res.status(200).json({ message: 'User logged out and tokens revoked successfully' });
+    // Revoke semua token refresh dan access pengguna
+    await admin.auth().revokeRefreshTokens(uid);
+
+    res.status(200).json({ message: 'Logout successful. Token revoked.' });
   } catch (error) {
-      console.error('Error during token revocation:', error);
-      res.status(500).json({ message: 'Logout failed', error });
+    console.error('Error revoking token:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
-};
+}
 
 exports.register = async (req, res) => {
   const { email, password, displayName } = req.body;

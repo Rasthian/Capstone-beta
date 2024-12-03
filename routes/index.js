@@ -3,13 +3,18 @@ const express = require('express');
 
 const router = express.Router();
 const firestoreController = require('../controllers/firestoreController');
-const storageController = require('../controllers/storageController');
-const { verifyToken } = require('../middleware/authMiddleware');
+
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
+const authMiddleware = require('../middleware/authMiddleware');
 
 
 router.post('/login', firestoreController.login );
+router.get('/protected', authMiddleware, (req, res) => {
+    res.status(200).json({ message: 'This is a protected route', user: req.user });
+  });
+
+
 router.post('/register', firestoreController.register );
 router.post('/logout',firestoreController.logout);
 
@@ -33,7 +38,8 @@ router.delete('/comment/:id', firestoreController.deleteComment); // Menggunakan
 
 
 router.get('/article', firestoreController.getAllArticle);
+router.post('/article', upload.single('image_url'), firestoreController.addArticle);
 
-router.post('/upload', upload.single('file'), storageController.uploadFile);
+
 
 module.exports = router;
