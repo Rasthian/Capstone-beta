@@ -4,8 +4,9 @@ const {
 const admin = require('firebase-admin');
 const storageController = require('./storageController');
 const axios = require('axios');
-const dotenv = require('dotenv');
-exports.getAllTopic = async (req, res) => {
+
+
+exports.getAllTopic = async (res) => {
   try {
     const snapshot = await db.collection('topics').get();
     const documents = snapshot.docs.map(doc => ({
@@ -34,11 +35,10 @@ exports.getAllTopic = async (req, res) => {
   }
 
 };
-
-
 exports.addTopic = async (req, res) => {
   try {
     const data = req.body;
+
     if (
       typeof data.account_id !== 'string' ||
       typeof data.topic !== 'string' ||
@@ -50,6 +50,8 @@ exports.addTopic = async (req, res) => {
         message: 'Invalid data format. Data must contain only account_id and topic as strings.'
       });
     }
+
+    // Validasi panjang topic
     if (data.topic.length > 255) {
       return res.status(400).json({
         status: 'error',
@@ -57,17 +59,33 @@ exports.addTopic = async (req, res) => {
         message: 'Topic exceeds maximum length of 255 characters.'
       });
     }
+
+    // Pastikan account_id sesuai dengan UID user yang terautentikasi
+    if (data.account_id !== req.user.uid) {
+      return res.status(403).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Access denied. You can only add topics for your own account.'
+      });
+    }
+
+    // Tambahkan timestamp
     data.topic_date = admin.firestore.FieldValue.serverTimestamp();
+
+    // Simpan data ke Firestore
     const docRef = await db.collection('topics').add(data);
+
+    // Respon sukses
     res.status(201).json({
       status: 'success',
       timestamp: new Date().toISOString(),
       data: {
         id: docRef.id,
-        message: 'Topics added successfully!'
+        message: 'Topic added successfully!'
       }
     });
   } catch (error) {
+    console.error('Error in addTopic:', error);
     res.status(500).json({
       status: 'error',
       timestamp: new Date().toISOString(),
@@ -75,51 +93,93 @@ exports.addTopic = async (req, res) => {
     });
   }
 };
-
-exports.getTopicByUid = async (req, res) => {
+exports.getTopicById = async (req, res) => {
   try {
-    const {
-      uid
-    } = req.params;
-    const snapshot = await db.collection('topics').where('account_id', '==', uid).get();
+    const { id } = req.params; // ID topik dari parameter URL
+    const snapshot = await db.collection('topics').doc(id).get();
 
-    if (snapshot.empty) {
+    // Validasi jika topik tidak ditemukan
+    if (!snapshot.exists) {
       return res.status(404).json({
         status: 'error',
         timestamp: new Date().toISOString(),
-        message: 'No topics found for this account'
+        message: 'Topic not found',
       });
     }
 
-    const topics = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const topic = snapshot.data();
+
     res.status(200).json({
       status: 'success',
       timestamp: new Date().toISOString(),
       data: {
-        topics: topics
-      }
+        id,
+        topic,
+      },
     });
   } catch (error) {
+    console.error('Error in getTopicById:', error);
     res.status(500).json({
       status: 'error',
       timestamp: new Date().toISOString(),
-      message: error.message
+      message: error.message,
     });
   }
 };
+exports.getTopicByUid = async (req, res) => {
+  try {
+    const {
+      uid
+    } = req.params; // UID dari parameter URL
 
+    // Query untuk mengambil topik berdasarkan UID
+    const snapshot = await db.collection('topics').where('account_id', '==', uid).get();
 
+    // Validasi jika tidak ada data
+    if (snapshot.empty) {
+      return res.status(404).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'No topics found for this account',
+      });
+    }
+
+    // Format data dari snapshot
+    const topics = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    // Kirimkan respons sukses
+    res.status(200).json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      data: {
+        topics,
+      },
+    });
+  } catch (error) {
+    console.error('Error in getTopicByUid:', error);
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      message: error.message,
+    });
+  }
+};
 exports.deleteTopic = async (req, res) => {
   try {
     const {
       id
-    } = req.params;
-    const doc = await db.collection('topics').doc(id).get();
+    } = req.params; // Mendapatkan ID dari parameter URL
+    const authenticatedUid = req.user.uid; // UID dari pengguna yang terautentikasi
 
-    if (!doc.exists) {
+    // Ambil dokumen topik berdasarkan ID
+    const topicRef = db.collection('topics').doc(id);
+    const topicDoc = await topicRef.get();
+
+    // Validasi keberadaan dokumen
+    if (!topicDoc.exists) {
       return res.status(404).json({
         status: "error",
         message: "Topic not found",
@@ -130,8 +190,23 @@ exports.deleteTopic = async (req, res) => {
       });
     }
 
-    await db.collection('topics').doc(id).delete();
+    // Validasi kepemilikan dokumen
+    const topicData = topicDoc.data();
+    if (topicData.account_id !== authenticatedUid) {
+      return res.status(403).json({
+        status: "error",
+        message: "Access denied. You can only delete your own topics.",
+        error: {
+          code: 403,
+          details: "User is not authorized to delete this topic."
+        }
+      });
+    }
 
+    // Hapus dokumen
+    await topicRef.delete();
+
+    // Kirimkan respons sukses
     res.status(200).json({
       status: "success",
       message: "Topic deleted successfully",
@@ -143,6 +218,7 @@ exports.deleteTopic = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error in deleteTopic:', error);
     res.status(500).json({
       status: "error",
       message: "Failed to delete topic",
@@ -152,17 +228,16 @@ exports.deleteTopic = async (req, res) => {
       }
     });
   }
-
 };
-
 exports.updateTopic = async (req, res) => {
   try {
     const {
       id
-    } = req.params;
-    const data = req.body;
+    } = req.params; // Mendapatkan ID dari parameter URL
+    const authenticatedUid = req.user.uid; // UID dari user yang terautentikasi
+    const data = req.body; // Data yang dikirimkan dari request body
 
-    // Validasi panjang data
+    // Validasi panjang `topic`
     if (data.topic && data.topic.length > 255) {
       return res.status(400).json({
         status: "error",
@@ -174,11 +249,12 @@ exports.updateTopic = async (req, res) => {
       });
     }
 
-    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
-    const doc = await db.collection('topics').doc(id).get();
+    // Ambil dokumen topik berdasarkan ID
+    const topicRef = db.collection('topics').doc(id);
+    const topicDoc = await topicRef.get();
 
     // Validasi keberadaan dokumen
-    if (!doc.exists) {
+    if (!topicDoc.exists) {
       return res.status(404).json({
         status: "error",
         message: "Topic not found",
@@ -189,21 +265,38 @@ exports.updateTopic = async (req, res) => {
       });
     }
 
-    // Update dokumen
-    await db.collection('topics').doc(id).update(data);
+    // Validasi kepemilikan dokumen (hanya pemilik yang boleh mengedit)
+    const topicData = topicDoc.data();
+    if (topicData.account_id !== authenticatedUid) {
+      return res.status(403).json({
+        status: "error",
+        message: "Access denied. You can only update your own topics.",
+        error: {
+          code: 403,
+          details: "User is not authorized to update this topic."
+        }
+      });
+    }
 
+    // Tambahkan timestamp untuk pembaruan
+    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
+
+    // Perbarui dokumen
+    await topicRef.update(data);
+
+    // Kirimkan respons sukses
     res.status(200).json({
       status: "success",
       message: "Topic updated successfully",
       data: {
-        id: id,
-        updatedFields: data
+        id: id
       },
       meta: {
         timestamp: new Date().toISOString()
       }
     });
   } catch (error) {
+    console.error('Error in updateTopic:', error);
     res.status(500).json({
       status: "error",
       message: "Failed to update topic",
@@ -213,12 +306,11 @@ exports.updateTopic = async (req, res) => {
       }
     });
   }
-
 };
 
 
 
-exports.getAllArticle = async (req, res) => {
+exports.getAllArticle = async ( res) => {
   try {
     const snapshot = await db.collection('article').get();
     const documents = snapshot.docs.map(doc => ({
@@ -294,6 +386,48 @@ exports.addArticle = async (req, res) => {
     });
   }
 };
+
+exports.addPrediction = async (req, res) => {
+  try {
+    const data = req.body;
+
+    data
+    // Validasi keberadaan file gambar
+    const imageFile = req.file;
+    if (!imageFile) {
+      return res.status(400).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Image file is required.'
+      });
+    }
+
+    // Upload gambar dan simpan URL
+    const imageUrl = await storageController.uploadImageToFirebase(imageFile);
+    data.image_url = imageUrl;
+
+    // Menambahkan timestamp
+    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
+
+    // Menambahkan artikel ke database
+    const docRef = await db.collection('prediction').add(data);
+    res.status(201).json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      data: {
+        id: docRef.id,
+        message: 'prediction added successfully!'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      message: error.message
+    });
+  }
+};
+
 exports.addComment = async (req, res) => {
   try {
     const data = req.body;
@@ -326,7 +460,13 @@ exports.addComment = async (req, res) => {
         }
       });
     }
-
+    if (data.account_id !== req.user.uid) {
+      return res.status(403).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        message: 'Access denied. You can only add topics for your own account.'
+      });
+    }
     data.comment_date = admin.firestore.FieldValue.serverTimestamp();
 
     // Menambahkan data ke Firestore
@@ -354,8 +494,7 @@ exports.addComment = async (req, res) => {
     });
   }
 };
-
-exports.getAllComment = async (req, res) => {
+exports.getAllComment = async ( res) => {
   try {
     const snapshot = await db.collection('comment').get();
     const documents = snapshot.docs.map(doc => ({
@@ -384,11 +523,9 @@ exports.getAllComment = async (req, res) => {
   }
 
 };
-
-
-// Mengambil komentar berdasarkan article_id
-exports.getCommentByTopicId = async (req, res) => {
+exports.getCommentByTopicId = async ( res) => {
   try {
+
     const snapshot = await db.collection('comment').get();
     const documents = snapshot.docs.map(doc => ({
       id: doc.id,
@@ -420,9 +557,11 @@ exports.getCommentByUid = async (req, res) => {
   try {
     const {
       uid
-    } = req.params;
+    } = req.params; // UID dari parameter URL
+
     const snapshot = await db.collection('comment').where('account_id', '==', uid).get();
 
+    // Validasi jika tidak ada data
     if (snapshot.empty) {
       return res.status(404).json({
         status: "error",
@@ -434,11 +573,13 @@ exports.getCommentByUid = async (req, res) => {
       });
     }
 
+    // Format data dari snapshot
     const documents = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     }));
 
+    // Kirimkan respons sukses
     res.status(200).json({
       status: "success",
       message: "Comments retrieved successfully",
@@ -450,6 +591,7 @@ exports.getCommentByUid = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error in getCommentByUid:', error);
     res.status(500).json({
       status: "error",
       message: "Failed to retrieve comments",
@@ -459,34 +601,35 @@ exports.getCommentByUid = async (req, res) => {
       }
     });
   }
-
 };
-// Memperbarui komentar
 exports.updateComment = async (req, res) => {
   try {
     const {
       id
-    } = req.params;
-    const data = req.body;
+    } = req.params; // ID komentar dari parameter URL
+    const data = req.body; // Data pembaruan dari body request
+    const authenticatedUid = req.user.uid; // UID user terautentikasi dari middleware
 
     // Validasi panjang komentar
     if (data.comment && data.comment.length > 255) {
       return res.status(400).json({
-        status: "error",
-        message: "Comment exceeds maximum length of 255 characters.",
+        status: 'error',
+        message: 'Comment exceeds maximum length of 255 characters.',
         error: {
           code: 400,
-          details: "Comment text must be less than or equal to 255 characters."
+          details: 'Comment text must be less than or equal to 255 characters.'
         }
       });
     }
 
-    // Mengambil komentar berdasarkan ID
-    const doc = await db.collection('comment').doc(id).get();
-    if (!doc.exists) {
+    // Mengambil dokumen komentar berdasarkan ID
+    const commentRef = db.collection('comment').doc(id);
+    const commentDoc = await commentRef.get();
+
+    if (!commentDoc.exists) {
       return res.status(404).json({
-        status: "error",
-        message: "Comment not found",
+        status: 'error',
+        message: 'Comment not found',
         error: {
           code: 404,
           details: `No comment found with id: ${id}`
@@ -494,80 +637,105 @@ exports.updateComment = async (req, res) => {
       });
     }
 
-    // Menambahkan tanggal komentar dan memperbarui data
+    // Periksa apakah account_id dari dokumen cocok dengan UID user terautentikasi
+    const commentData = commentDoc.data();
+    if (commentData.account_id !== authenticatedUid) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access denied. You can only update your own comments.',
+        error: {
+          code: 403,
+          details: 'User is not authorized to update this comment.'
+        }
+      });
+    }
+
+    // Tambahkan timestamp pembaruan
     data.comment_date = admin.firestore.FieldValue.serverTimestamp();
-    await db.collection('comment').doc(id).update(data);
 
-    // Mengirim respons sukses
+    // Perbarui dokumen
+    await commentRef.update(data);
+
+    // Kirim respons sukses
     res.status(200).json({
-      status: "success",
-      message: "Comment updated successfully",
-      data: {
-        id,
-        ...data
-      },
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Failed to update comment",
-      error: {
-        code: 500,
-        details: error.message
-      }
-    });
-  }
-
-};
-// Menghapus komentar
-exports.deleteComment = async (req, res) => {
-  try {
-    const {
-      id
-    } = req.params; // Mengambil parameter ID dari URL
-    const doc = await db.collection('comment').doc(id).get();
-
-    if (!doc.exists) {
-      return res.status(404).json({
-        status: "error",
-        message: "Comment not found",
-        error: {
-          code: 404,
-          details: `No comment found with id: ${id}`
-        }
-      });
-    }
-
-    // Menghapus komentar
-    await db.collection('comment').doc(id).delete();
-
-    // Mengirim respons sukses
-    res.status(200).json({
-      status: "success",
-      message: "Comment deleted successfully",
+      status: 'success',
+      message: 'Comment updated successfully',
       data: {
         id
       },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    console.error('Error in updateComment:', error);
     res.status(500).json({
-      status: "error",
-      message: "Failed to delete comment",
+      status: 'error',
+      message: 'Failed to update comment',
       error: {
         code: 500,
         details: error.message
       }
     });
   }
-
 };
+exports.deleteComment = async (req, res) => {
+  try {
+    const {
+      id
+    } = req.params; // Mengambil parameter ID dari URL
+    const authenticatedUid = req.user.uid; // UID user terautentikasi dari middleware
 
+    // Mengambil dokumen komentar berdasarkan ID
+    const commentRef = db.collection('comment').doc(id);
+    const commentDoc = await commentRef.get();
 
+    if (!commentDoc.exists) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Comment not found',
+        error: {
+          code: 404,
+          details: `No comment found with id: ${id}`
+        }
+      });
+    }
 
+    // Validasi kepemilikan komentar berdasarkan UID
+    const commentData = commentDoc.data();
+    if (commentData.account_id !== authenticatedUid) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Access denied. You can only delete your own comments.',
+        error: {
+          code: 403,
+          details: 'User is not authorized to delete this comment.'
+        }
+      });
+    }
 
+    // Menghapus komentar
+    await commentRef.delete();
 
+    // Mengirim respons sukses
+    res.status(200).json({
+      status: 'success',
+      message: 'Comment deleted successfully',
+      data: {
+        id
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error in deleteComment:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete comment',
+      error: {
+        code: 500,
+        details: error.message
+      }
+    });
+  }
+};
 
 
 //AUTH
@@ -620,14 +788,8 @@ exports.login = async (req, res) => {
         },
       });
     }
-  },
-
-
-
-
-
-
-  exports.logout = async (req, res) => {
+  };
+exports.logout = async (req, res) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -674,10 +836,13 @@ exports.login = async (req, res) => {
       });
     }
 
-  }
-
+  };
 exports.register = async (req, res) => {
-  const { email, password, displayName } = req.body;
+  const {
+    email,
+    password,
+    displayName
+  } = req.body;
 
   try {
     // Membuat pengguna di Firebase Authentication
@@ -686,14 +851,15 @@ exports.register = async (req, res) => {
       password,
       displayName,
     });
-  
+
     // Menyimpan data pengguna di Firestore
     await admin.firestore().collection('accounts').doc(userRecord.uid).set({
       email,
       displayName,
+      imageProfile,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-  
+
     // Respons sukses pendaftaran pengguna
     res.status(201).json({
       status: 'success',
@@ -702,12 +868,13 @@ exports.register = async (req, res) => {
         uid: userRecord.uid,
         email: userRecord.email,
         displayName: userRecord.displayName,
+        imageProfile: imageProfile || null,
       },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error('Error registering user:', error.message);
-  
+
     // Respons error pendaftaran pengguna
     res.status(400).json({
       status: 'error',
@@ -718,5 +885,88 @@ exports.register = async (req, res) => {
       },
     });
   }
-  
-}
+
+};
+exports.editProfile = async (req, res) => {
+  const { uid } = req.params; // Ambil UID dari parameter URL
+  const { displayName } = req.body; // Data yang akan di-update
+  const imageFile = req.file; // Gambar yang diunggah
+
+  try {
+    // Validasi input
+    if (!displayName && !imageFile) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'At least one field (displayName or imageProfile) is required for update',
+      });
+    }
+
+    // Ambil data akun dari Firestore
+    const accountRef = admin.firestore().collection('accounts').doc(uid);
+    const accountDoc = await accountRef.get();
+
+    if (!accountDoc.exists) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Account not found',
+      });
+    }
+
+    const currentData = accountDoc.data();
+    const updateData = {};
+
+    // Proses upload gambar jika ada
+    if (imageFile) {
+      let imageUrl;
+
+      // Hapus gambar lama jika ada
+      if (currentData.imageProfile) {
+        const oldFileName = currentData.imageProfile.split('/').pop(); // Ambil nama file lama
+        const bucket = admin.storage().bucket(); // Ambil bucket storage
+        await bucket.file(oldFileName).delete(); // Hapus file lama dari Firebase Storage
+        console.log(`Old file ${oldFileName} has been deleted.`);
+      }
+
+      // Unggah gambar baru
+      imageUrl = await storageController.uploadImageToFirebase(imageFile);
+      updateData.imageProfile = imageUrl;
+    }
+
+    // Update displayName jika ada
+    if (displayName) {
+      updateData.displayName = displayName;
+
+      // Update juga di Authentication Firebase
+      await admin.auth().updateUser(uid, { displayName });
+    }
+
+    updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+
+    // Update data Firestore
+    await accountRef.update(updateData);
+
+    // Respons sukses
+    res.status(200).json({
+      status: 'success',
+      message: 'Profile updated successfully',
+      data: {
+        uid,
+        ...(displayName && { displayName }),
+        ...(updateData.imageProfile && { imageProfile: updateData.imageProfile }),
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error.message);
+
+    // Respons error
+    res.status(500).json({
+      status: 'error',
+      message: 'Error updating profile',
+      error: {
+        code: 500,
+        details: error.message || 'An error occurred while updating the profile',
+      },
+    });
+  }
+};
