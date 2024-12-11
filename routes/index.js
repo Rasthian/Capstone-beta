@@ -32,10 +32,8 @@ router.post('/comment',authMiddleware, firestoreController.addComment);
 router.put('/comment/:id',authMiddleware, firestoreController.updateComment);    // Menggunakan parameter ID untuk memperbarui komentar berdasarkan ID
 router.delete('/comment/:id',authMiddleware, firestoreController.deleteComment); // Menggunakan parameter ID untuk menghapus komentar berdasarkan ID
 
-router.delete('/prediction/:uid',authMiddleware, firestoreController.deleteComment);
 
 router.get('/article', firestoreController.getAllArticle);
-router.post('/article', upload.single('image_url'), firestoreController.addArticle);
 
 
 
