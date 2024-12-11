@@ -6,7 +6,7 @@ const storageController = require('./storageController');
 const axios = require('axios');
 
 
-exports.getAllTopic = async (res) => {
+exports.getAllTopic = async (req, res) => {
   try {
     const snapshot = await db.collection('topics').get();
     const documents = snapshot.docs.map(doc => ({
@@ -310,7 +310,7 @@ exports.updateTopic = async (req, res) => {
 
 
 
-exports.getAllArticle = async ( res) => {
+exports.getAllArticle = async (req, res) => {
   try {
     const snapshot = await db.collection('article').get();
     const documents = snapshot.docs.map(doc => ({
@@ -338,95 +338,7 @@ exports.getAllArticle = async ( res) => {
     });
   }
 };
-exports.addArticle = async (req, res) => {
-  try {
-    const data = req.body;
 
-    // Validasi panjang deskripsi
-    if (data.short_description.length > 255) {
-      return res.status(400).json({
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Article exceeds maximum length of 255 characters.'
-      });
-    }
-
-    // Validasi keberadaan file gambar
-    const imageFile = req.file;
-    if (!imageFile) {
-      return res.status(400).json({
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Image file is required.'
-      });
-    }
-
-    // Upload gambar dan simpan URL
-    const imageUrl = await storageController.uploadImageToFirebase(imageFile);
-    data.image_url = imageUrl;
-
-    // Menambahkan timestamp
-    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
-
-    // Menambahkan artikel ke database
-    const docRef = await db.collection('article').add(data);
-    res.status(201).json({
-      status: 'success',
-      timestamp: new Date().toISOString(),
-      data: {
-        id: docRef.id,
-        message: 'Article added successfully!'
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      timestamp: new Date().toISOString(),
-      message: error.message
-    });
-  }
-};
-
-exports.addPrediction = async (req, res) => {
-  try {
-    const data = req.body;
-
-    data
-    // Validasi keberadaan file gambar
-    const imageFile = req.file;
-    if (!imageFile) {
-      return res.status(400).json({
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        message: 'Image file is required.'
-      });
-    }
-
-    // Upload gambar dan simpan URL
-    const imageUrl = await storageController.uploadImageToFirebase(imageFile);
-    data.image_url = imageUrl;
-
-    // Menambahkan timestamp
-    data.topic_date = admin.firestore.FieldValue.serverTimestamp();
-
-    // Menambahkan artikel ke database
-    const docRef = await db.collection('prediction').add(data);
-    res.status(201).json({
-      status: 'success',
-      timestamp: new Date().toISOString(),
-      data: {
-        id: docRef.id,
-        message: 'prediction added successfully!'
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      timestamp: new Date().toISOString(),
-      message: error.message
-    });
-  }
-};
 
 exports.addComment = async (req, res) => {
   try {
@@ -494,7 +406,7 @@ exports.addComment = async (req, res) => {
     });
   }
 };
-exports.getAllComment = async ( res) => {
+exports.getAllComment = async ( req, res) => {
   try {
     const snapshot = await db.collection('comment').get();
     const documents = snapshot.docs.map(doc => ({
@@ -523,7 +435,7 @@ exports.getAllComment = async ( res) => {
   }
 
 };
-exports.getCommentByTopicId = async ( res) => {
+exports.getCommentByTopicId = async ( req, res) => {
   try {
 
     const snapshot = await db.collection('comment').get();
@@ -841,8 +753,18 @@ exports.register = async (req, res) => {
   const {
     email,
     password,
-    displayName
+    displayName,
+    imageProfile = null, // Default imageProfile ke null jika tidak ada
   } = req.body;
+
+  // Validasi Password
+  const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/; // Minimal 8 karakter, mengandung angka dan huruf kapital
+  if (!passwordRegex.test(password)) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Password must be at least 8 characters long, contain a number, and an uppercase letter.',
+    });
+  }
 
   try {
     // Membuat pengguna di Firebase Authentication
@@ -856,7 +778,7 @@ exports.register = async (req, res) => {
     await admin.firestore().collection('accounts').doc(userRecord.uid).set({
       email,
       displayName,
-      imageProfile,
+      imageProfile, // Akan null jika tidak dikirim
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -885,23 +807,34 @@ exports.register = async (req, res) => {
       },
     });
   }
-
 };
+
 exports.editProfile = async (req, res) => {
   const { uid } = req.params; // Ambil UID dari parameter URL
   const { displayName } = req.body; // Data yang akan di-update
   const imageFile = req.file; // Gambar yang diunggah
+  const authHeader = req.headers.authorization; // Token dikirim di header Authorization
 
   try {
-    // Validasi input
-    if (!displayName && !imageFile) {
-      return res.status(400).json({
+    // 1. Verifikasi token
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
         status: 'error',
-        message: 'At least one field (displayName or imageProfile) is required for update',
+        message: 'Unauthorized: No token provided',
       });
     }
 
-    // Ambil data akun dari Firestore
+    const token = authHeader.split(' ')[1]; // Ambil token dari header
+    const decodedToken = await admin.auth().verifyIdToken(token);
+
+    if (decodedToken.uid !== uid) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Forbidden: You are not allowed to edit this profile',
+      });
+    }
+
+    // 2. Ambil data akun dari Firestore
     const accountRef = admin.firestore().collection('accounts').doc(uid);
     const accountDoc = await accountRef.get();
 
@@ -915,7 +848,15 @@ exports.editProfile = async (req, res) => {
     const currentData = accountDoc.data();
     const updateData = {};
 
-    // Proses upload gambar jika ada
+    // 3. Validasi input
+    if (!displayName && !imageFile) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'At least one field (displayName or imageProfile) is required for update',
+      });
+    }
+
+    // 4. Proses upload gambar jika ada
     if (imageFile) {
       let imageUrl;
 
@@ -932,7 +873,7 @@ exports.editProfile = async (req, res) => {
       updateData.imageProfile = imageUrl;
     }
 
-    // Update displayName jika ada
+    // 5. Update displayName jika ada
     if (displayName) {
       updateData.displayName = displayName;
 
@@ -942,10 +883,10 @@ exports.editProfile = async (req, res) => {
 
     updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
 
-    // Update data Firestore
+    // 6. Update data Firestore
     await accountRef.update(updateData);
 
-    // Respons sukses
+    // 7. Respons sukses
     res.status(200).json({
       status: 'success',
       message: 'Profile updated successfully',
