@@ -15,7 +15,6 @@ router.post('/register', firestoreController.register );
 router.post('/logout',firestoreController.logout);
 
 
-
 // Route untuk 'topic'
 router.get('/topic',authMiddleware, firestoreController.getAllTopic);
 router.get('/topic/:id', authMiddleware, firestoreController.getTopicById); // Rute dengan ID
