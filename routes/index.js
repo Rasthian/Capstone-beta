@@ -13,6 +13,7 @@ router.post('/login', firestoreController.login );
 router.put('/profile/:uid', upload.single('imageProfile'), firestoreController.editProfile);
 router.post('/register', firestoreController.register );
 router.post('/logout',firestoreController.logout);
+router.get('/profile/:uid',authMiddleware, firestoreController.getProfile);
 
 
 // Route untuk 'topic'

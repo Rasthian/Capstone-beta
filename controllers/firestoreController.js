@@ -912,3 +912,69 @@ exports.editProfile = async (req, res) => {
   }
 };
 
+exports.getProfile = async (req, res) => {
+  const { uid } = req.params; // Ambil UID dari parameter URL
+  const authHeader = req.headers.authorization; // Token dikirim di header Authorization
+
+  try {
+    // 1. Verifikasi token
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Unauthorized: No token provided',
+      });
+    }
+
+    const token = authHeader.split(' ')[1]; // Ambil token dari header
+    const decodedToken = await admin.auth().verifyIdToken(token);
+
+    if (decodedToken.uid !== uid) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Forbidden: You are not allowed to access this profile',
+      });
+    }
+
+    // 2. Ambil data akun dari Firestore
+    const accountRef = admin.firestore().collection('accounts').doc(uid);
+    const accountDoc = await accountRef.get();
+
+    if (!accountDoc.exists) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Account not found',
+      });
+    }
+
+    const accountData = accountDoc.data();
+
+    // 3. Kirim data profil
+    res.status(200).json({
+      status: 'success',
+      message: 'Profile retrieved successfully',
+      data: {
+        uid,
+        displayName: accountData.displayName || '',
+        imageProfile: accountData.imageProfile || '',
+        createdAt: accountData.createdAt?.toDate().toISOString() || '',
+        updatedAt: accountData.updatedAt?.toDate().toISOString() || '',
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error retrieving profile:', error.message);
+
+    // Respons error
+    res.status(500).json({
+      status: 'error',
+      message: 'Error retrieving profile',
+      error: {
+        code: 500,
+        details: error.message || 'An error occurred while retrieving the profile',
+      },
+    });
+  }
+};
+
+
+
