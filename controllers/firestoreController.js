@@ -926,14 +926,7 @@ exports.getProfile = async (req, res) => {
     }
 
     const token = authHeader.split(' ')[1]; // Ambil token dari header
-    const decodedToken = await admin.auth().verifyIdToken(token);
-
-    if (decodedToken.uid !== uid) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Forbidden: You are not allowed to access this profile',
-      });
-    }
+    await admin.auth().verifyIdToken(token); // Hanya memverifikasi token, tidak membandingkan UID
 
     // 2. Ambil data akun dari Firestore
     const accountRef = admin.firestore().collection('accounts').doc(uid);
@@ -975,6 +968,7 @@ exports.getProfile = async (req, res) => {
     });
   }
 };
+
 
 
 
