@@ -117,4 +117,4 @@ To get started with the project, clone this repository to your local machine:
 
 ```bash
 git clone https://github.com/Rasthian/Capstone-beta.git
-cd subur
+cd Capstone-beta
