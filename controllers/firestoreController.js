@@ -978,3 +978,51 @@ exports.getProfile = async (req, res) => {
 
 
 
+exports.getTopUsersByTopics = async (req, res) => {
+  try {
+    // Aggregate untuk menghitung jumlah topic per pengguna
+    const topicsSnapshot = await db.collection('topics').get();
+    const topicCountMap = {};
+
+    topicsSnapshot.forEach((doc) => {
+      const { account_id } = doc.data();
+      if (account_id) {
+        topicCountMap[account_id] = (topicCountMap[account_id] || 0) + 1;
+      }
+    });
+
+    // Urutkan berdasarkan jumlah topic terbanyak
+    const sortedTopics = Object.entries(topicCountMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10); // Ambil hanya 10 pengguna teratas
+
+    // Ambil data pengguna dari Firestore berdasarkan UID
+    const topUsers = await Promise.all(
+      sortedTopics.map(async ([uid, topicCount]) => {
+        const userDoc = await db.collection('accounts').doc(uid).get();
+        return {
+          uid,
+          displayName: userDoc.exists ? userDoc.data().displayName : 'Unknown User',
+          topicCount,
+        };
+      })
+    );
+
+    // Kirimkan respons sukses
+    res.status(200).json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      data: {
+        topUsers,
+      },
+    });
+  } catch (error) {
+    console.error('Error in getTopUsersByTopics:', error);
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      message: error.message,
+    });
+  }
+};
+

@@ -34,6 +34,7 @@ router.delete('/comment/:id',authMiddleware, firestoreController.deleteComment);
 
 
 router.get('/article', firestoreController.getAllArticle);
+router.get('/users/top/topics', firestoreController.getTopUsersByTopics);
 
 
 
