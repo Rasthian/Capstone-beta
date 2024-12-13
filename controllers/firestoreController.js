@@ -1026,3 +1026,50 @@ exports.getTopUsersByTopics = async (req, res) => {
   }
 };
 
+exports.getTopUsersByComments = async (req, res) => {
+  try {
+    // Aggregate untuk menghitung jumlah comment per pengguna
+    const commentsSnapshot = await db.collection('comment').get();
+    const commentCountMap = {};
+
+    commentsSnapshot.forEach((doc) => {
+      const { account_id } = doc.data();
+      if (account_id) {
+        commentCountMap[account_id] = (commentCountMap[account_id] || 0) + 1;
+      }
+    });
+
+    // Urutkan berdasarkan jumlah comment terbanyak
+    const sortedComments = Object.entries(commentCountMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10); // Ambil hanya 10 pengguna teratas
+
+    // Ambil data pengguna dari Firestore berdasarkan UID
+    const topUsers = await Promise.all(
+      sortedComments.map(async ([uid, commentCount]) => {
+        const userDoc = await db.collection('accounts').doc(uid).get();
+        return {
+          uid,
+          displayName: userDoc.exists ? userDoc.data().displayName : 'Unknown User',
+          commentCount,
+        };
+      })
+    );
+
+    // Kirimkan respons sukses
+    res.status(200).json({
+      status: 'success',
+      timestamp: new Date().toISOString(),
+      data: {
+        topUsers,
+      },
+    });
+  } catch (error) {
+    console.error('Error in getTopUsersByComments:', error);
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      message: error.message,
+    });
+  }
+};
