@@ -29,14 +29,6 @@ The backend handles API requests related to topics, articles, comments, and user
   - **Firewalls**: HTTP and HTTPS traffic allowed.  
   - **Purpose**: Handles backend API operations and high-volume user requests.
 
-- **Machine Learning Instance (subur-ml)**  
-  - **Instance ID**: `4481085253010851910`  
-  - **Machine Type**: `e2-small` (1 vCPU, 2 GB RAM)  
-  - **Creation Time**: Dec 11, 2024, 10:58 PM (UTC+07:00)  
-  - **Location**: `asia-southeast2-b`  
-  - **Firewalls**: HTTP and HTTPS traffic allowed.  
-  - **Purpose**: Runs the machine learning models for disease detection and crop production analysis.
-
 ---
 ## Backend Access URLs
 
